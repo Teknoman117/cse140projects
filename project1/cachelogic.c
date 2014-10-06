@@ -83,9 +83,100 @@ void accessMemory(address addr, word* data, WriteEnable we)
   /* Declare variables here */
 
   /* handle the case of no cache at all - leave this in */
-  if(assoc == 0) {
+  if(assoc == 0 || view != ASSOC) 
+  {
     accessDRAM(addr, (byte*)data, WORD_SIZE, we);
     return;
+  }
+
+  // Deal with an associative cache 
+  if(view == ASSOC)
+  {
+    unsigned int bBits = uint_log2(block_size);
+    unsigned int sBits = uint_log2(set_count);
+    unsigned int tBits = 32 - (bBits + sBits);
+    
+    unsigned int bMask = (1 << bBits) - 1;
+    unsigned int sMask = (1 << sBits) - 1;
+    unsigned int tMask = (1 << tBits) - 1;
+    
+    unsigned int offset = addr & bMask;
+    unsigned int set = (addr >> bBits) & sMask;
+    unsigned int tag = (addr >> (bBits + sBits)) & tMask;
+    
+    // If we are performing a memory read
+    if(we == READ)
+    {
+      // Assoc block to access
+      unsigned int block = 0;
+    
+      // Attempt to find the row in cache
+      for(unsigned int i = 0; i < assoc; i++)
+      {
+        if(cache[set].block[i].tag == tag)
+        {
+          block = i;
+          if(cache[set].block[i].valid == INVALID)
+          {
+            goto load;
+          }
+        
+          // CACHE HIT!
+          goto done;
+        }
+      }
+      
+      // If we failed to retrieve from cache, attempt to load it
+      // Attempt to find an invalid spot
+      for(unsigned int i = 0; i < assoc; i++)
+      {
+        if(cache[set].block[i].valid == INVALID)
+        {
+          block = i;
+          goto load; 
+        }
+      }
+      
+      // If there were no invalid blocks, implement our replacement policy
+      // random replacement
+      if(policy == RANDOM)
+      {
+        block = randomint(assoc);
+      }
+      
+      // least frequently used
+      else if (policy == LFU)
+      {
+        unsigned int lowest = 0xFFFFFFFF;
+        for(int i = 0; i < assoc; i++)
+        {
+          if(cache[set].block[i].accessCount < lowest)
+          {
+            block = i;
+            lowest = cache[set].block[i].accessCount;
+          }
+        }
+      }
+      
+      // least recently used
+      else
+      {
+        // IMPLEMENT
+        assert(0);
+      }
+load:
+      for(int j = 0; j < block_size; j++)
+        accessDRAM(addr + j, (byte *) cache[set].block[block].data + j, BYTE_SIZE, READ);
+      cache[set].block[block].valid = VALID;
+      cache[set].block[block].dirty = VIRGIN;
+      cache[set].block[block].tag = tag;
+      cache[set].block[block].accessCount = 0;
+      
+done:
+      // Service the read
+      memcpy((void *) data, (void *) ((byte *) cache[set].block[block].data + offset), sizeof(word));
+      cache[set].block[block].accessCount++;
+    }
   }
 
   /*
@@ -123,5 +214,6 @@ void accessMemory(address addr, word* data, WriteEnable we)
      At some point, ONCE YOU HAVE MORE OF YOUR CACHELOGIC IN PLACE,
      THIS LINE SHOULD BE REMOVED.
   */
-  accessDRAM(addr, (byte*)data, WORD_SIZE, we);
+  
+  //accessDRAM(addr, (byte*)data, WORD_SIZE, we);
 }
