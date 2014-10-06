@@ -92,17 +92,17 @@ void accessMemory(address addr, word* data, WriteEnable we)
   // Deal with an associative cache 
   if(view == ASSOC)
   {
-    unsigned int bBits = uint_log2(block_size);
+    unsigned int oBits = uint_log2(block_size);
     unsigned int sBits = uint_log2(set_count);
-    unsigned int tBits = 32 - (bBits + sBits);
+    unsigned int tBits = 32 - (oBits + sBits);
     
-    unsigned int bMask = (1 << bBits) - 1;
+    unsigned int oMask = (1 << oBits) - 1;
     unsigned int sMask = (1 << sBits) - 1;
     unsigned int tMask = (1 << tBits) - 1;
     
-    unsigned int offset = addr & bMask;
-    unsigned int set = (addr >> bBits) & sMask;
-    unsigned int tag = (addr >> (bBits + sBits)) & tMask;
+    unsigned int offset = addr & oMask;
+    unsigned int set = (addr >> oBits) & sMask;
+    unsigned int tag = (addr >> (oBits + sBits)) & tMask;
     
     // If we are performing a memory read
     if(we == READ)
@@ -164,7 +164,18 @@ void accessMemory(address addr, word* data, WriteEnable we)
         // IMPLEMENT
         assert(0);
       }
+
 load:
+      // If the block we are about to replace is dirty, replace it in memory
+      if(cache[set].block[block].dirty == DIRTY)
+      {
+          // Compute the address
+          address a = cache[set].block[block].tag << (oBits + sBits);
+          a |= (set << oBits);
+          for(int j = 0; j < block_size; j++)
+              accessDRAM(a + j, (byte *) cache[set].block[block].data + j, BYTE_SIZE, WRITE);
+      }
+
       for(int j = 0; j < block_size; j++)
         accessDRAM(addr + j, (byte *) cache[set].block[block].data + j, BYTE_SIZE, READ);
       cache[set].block[block].valid = VALID;

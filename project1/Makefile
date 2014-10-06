@@ -21,6 +21,8 @@ ifeq (,$(findstring LINUX,$(shell uname)))
 	LDFLAGS += -DLINUX
 endif
 
+all: $(EXEC)
+
 $(EXEC): $(OBJS)
 	$(CC) -Wall -g -o $(EXEC) $(OBJS) `pkg-config --cflags gtk+-2.0` `pkg-config --libs gtk+-2.0`
 
