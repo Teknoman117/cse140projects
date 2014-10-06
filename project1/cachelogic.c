@@ -115,6 +115,16 @@ unsigned int blockToReplace(unsigned int set)
     return 0xFFFFFFFF;
 }
 
+/* Access the DRAM */
+
+void accessDRAMWrapper(address addr, byte *data, unsigned int bytes, WriteEnable flag)
+{
+    for(int j = 0; j < bytes; j += 4)
+    {
+        accessDRAM(addr + j, data + j, WORD_SIZE, flag);
+    }
+}
+
 /*
   This is the primary function you are filling out,
   You are free to add helper functions if you need them
@@ -183,13 +193,11 @@ load:
             // Compute the address
             address a = cache[set].block[block].tag << (oBits + sBits);
             a |= (set << oBits);
-            for(int j = 0; j < block_size; j++)
-            accessDRAM(a + j, (byte *) cache[set].block[block].data + j, BYTE_SIZE, WRITE);
+            accessDRAMWrapper(a, (byte *) cache[set].block[block].data, block_size, WRITE);
         }
 
         // Perform load from dram
-        for(int j = 0; j < block_size; j++)
-            accessDRAM(addr + j, (byte *) cache[set].block[block].data + j, BYTE_SIZE, READ);
+        accessDRAMWrapper(addr, (byte *) cache[set].block[block].data, block_size, READ);
         cache[set].block[block].valid = VALID;
         cache[set].block[block].dirty = VIRGIN;
         cache[set].block[block].tag = tag;
@@ -214,13 +222,14 @@ service:
             // If the replacement policy is write through, service dram
             if(memory_sync_policy == WRITE_THROUGH)
             {
-                for(int j = 0; j < block_size; j++)
-                    accessDRAM(addr + j, (byte *) cache[set].block[block].data + j, BYTE_SIZE, WRITE);
+                accessDRAMWrapper(addr, (byte *) cache[set].block[block].data, block_size, WRITE);
             }
 
             // Otherwise we have dirty memory
             else
+            {
                 cache[set].block[block].dirty = DIRTY;
+            }
         }
     }
 }
