@@ -140,120 +140,94 @@ void accessDRAMWrapper(address addr, byte *data, unsigned int bytes, WriteEnable
 void accessMemory(address addr, word* data, WriteEnable we)
 {
     /* handle the case of no cache at all - leave this in */
-    if(assoc == 0 || view != ASSOC)
+    if(assoc == 0)
     {
         accessDRAM(addr, (byte*)data, WORD_SIZE, we);
         return;
     }
 
-    // TODO - handle edge case where block size and/or set count are 1
-
+    // Compute the bit sizes of different fields
     unsigned int oBits = uint_log2(block_size);
     unsigned int sBits = uint_log2(set_count);
     unsigned int tBits = 32 - (oBits + sBits);
 
+    // Compute bitwise masks for the fields
     unsigned int oMask = (1 << oBits) - 1;
     unsigned int sMask = (1 << sBits) - 1;
     unsigned int tMask = (1 << tBits) - 1;
 
+    // Get the values of the fields
     unsigned int offset = addr & oMask;
     unsigned int set = (addr >> oBits) & sMask;
     unsigned int tag = (addr >> (oBits + sBits)) & tMask;
 
-    // Deal with an associative cache
-    if(view == ASSOC)
+    // Assoc block to access
+    unsigned int block = 0;
+
+    // Attempt to find the row in cache
+    for(unsigned int i = 0; i < assoc; i++)
     {
-        // Assoc block to access
-        unsigned int block = 0;
-
-        // Attempt to find the row in cache
-        for(unsigned int i = 0; i < assoc; i++)
+        if(cache[set].block[i].tag == tag)
         {
-            if(cache[set].block[i].tag == tag)
+            block = i;
+            if(cache[set].block[i].valid == INVALID)
             {
-                block = i;
-                if(cache[set].block[i].valid == INVALID)
-                {
-                    // compulsory miss
-                    goto load;
-                }
-
-                // hit
-                goto service;
+                // compulsory miss
+                goto load;
             }
-        }
 
-        // miss
-        block = blockToReplace(set);
+            // cache hit
+            goto service;
+        }
+    }
+
+    // cache miss
+    block = blockToReplace(set);
 
 load:
-        // If the block we are about to replace is dirty, replace it in memory
-        if(cache[set].block[block].dirty == DIRTY && cache[set].block[block].valid == VALID)
-        {
-            // Compute the address
-            address a = cache[set].block[block].tag << (oBits + sBits);
-            a |= (set << oBits);
-            accessDRAMWrapper(a, (byte *) cache[set].block[block].data, block_size, WRITE);
-        }
+    // If the block we are about to replace is dirty, replace it in memory
+    if(cache[set].block[block].dirty == DIRTY && cache[set].block[block].valid == VALID)
+    {
+        // Compute the address
+        address a = cache[set].block[block].tag << (oBits + sBits);
+        a |= (set << oBits);
+        accessDRAMWrapper(a, (byte *) cache[set].block[block].data, block_size, WRITE);
+    }
 
-        // Perform load from dram
-        accessDRAMWrapper(addr & ~oMask, (byte *) cache[set].block[block].data, block_size, READ);
-        cache[set].block[block].valid = VALID;
-        cache[set].block[block].dirty = VIRGIN;
-        cache[set].block[block].tag = tag;
-        cache[set].block[block].accessCount = 0;
+    // Perform load from dram
+    accessDRAMWrapper(addr & ~oMask, (byte *) cache[set].block[block].data, block_size, READ);
+    cache[set].block[block].valid = VALID;
+    cache[set].block[block].dirty = VIRGIN;
+    cache[set].block[block].tag = tag;
+    cache[set].block[block].accessCount = 0;
 
 service:
-        // If we are reading from the memory
-        if(we == READ)
+    // If we are reading from the memory
+    if(we == READ)
+    {
+        // Service the read
+        memcpy((void *) data, (void *) ((byte *) cache[set].block[block].data + offset), sizeof(word));
+        cache[set].block[block].accessCount++;
+    }
+
+    // Otherwise we are writing to memory
+    else
+    {
+        // Service the write
+        memcpy((void *) ((byte *) cache[set].block[block].data + offset), (void *) data, sizeof(word));
+        cache[set].block[block].accessCount++;
+
+        // If the replacement policy is write through, service dram
+        if(memory_sync_policy == WRITE_THROUGH)
         {
-            // Service the read
-            memcpy((void *) data, (void *) ((byte *) cache[set].block[block].data + offset), sizeof(word));
-            cache[set].block[block].accessCount++;
+            // We need to set the offset to zero to load the whole row
+            accessDRAMWrapper(addr & ~oMask, (byte *) cache[set].block[block].data, block_size, WRITE);
         }
 
-        // Otherwise we are writing to memory
+        // Otherwise we have dirty memory
         else
         {
-            // Service the write
-            memcpy((void *) ((byte *) cache[set].block[block].data + offset), (void *) data, sizeof(word));
-            cache[set].block[block].accessCount++;
-
-            // If the replacement policy is write through, service dram
-            if(memory_sync_policy == WRITE_THROUGH)
-            {
-                // We need to set the offset to zero to load the whole row
-                accessDRAMWrapper(addr & ~oMask, (byte *) cache[set].block[block].data, block_size, WRITE);
-            }
-
-            // Otherwise we have dirty memory
-            else
-            {
-                cache[set].block[block].dirty = DIRTY;
-            }
+            cache[set].block[block].dirty = DIRTY;
         }
     }
 }
-
-
-/*
-The same code should handle random, LFU, and LRU policies. Test the policy
-variable (see tips.h) to decide which policy to execute. The LRU policy
-should be written such that no two blocks (when their valid bit is VALID)
-will ever be a candidate for replacement. In the case of a tie in the
-least number of accesses for LFU, you use the LRU information to determine
-which block to replace.
-
-Your cache should be able to support write-through mode (any writes to
-the cache get immediately copied to main memory also) and write-back mode
-(and writes to the cache only gets copied to main memory when the block
-is kicked out of the cache.
-
-Also, cache should do allocate-on-write. This means, a write operation
-will bring in an entire block if the block is not already in the cache.
-
-To properly work with the GUI, the code needs to tell the GUI code
-when to redraw and when to flash things. Descriptions of the animation
-functions can be found in tips.h
-*/
-
