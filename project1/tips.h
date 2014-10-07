@@ -121,7 +121,7 @@ int accessDRAM(address addr, byte* data, TransferUnit mode, WriteEnable flag);
     data - pointer to the 32-bit container used to send data to or from memory
     flag - states whether we want to READ from memory or WRITE to memory    
 */
-void accessMemory(address addr, word* data, WriteEnable flag);
+void accessMemory(address addr, byte* data, TransferUnit mode, WriteEnable flag);
 
 /*
   These are the GUI functions you can call to visualize changes in the cache

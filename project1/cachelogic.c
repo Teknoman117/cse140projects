@@ -146,13 +146,26 @@ void accessDRAMWrapper(address addr, byte *data, unsigned int bytes, WriteEnable
               if we == WRITE, then data used to
               update Cache/DRAM
 */
-void accessMemory(address addr, word* data, WriteEnable we)
+void accessMemory(address addr, byte* data, TransferUnit mode, WriteEnable we)
 {
     /* handle the case of no cache at all - leave this in */
     if(assoc == 0)
     {
-        accessDRAM(addr, (byte*)data, WORD_SIZE, we);
+        accessDRAM(addr, data, mode, we);
         return;
+    }
+
+    // Compute transfer bytes
+    size_t transferSize = 0;
+    if(mode == BYTE_SIZE)
+    {
+        transferSize = 1;
+    } else if(mode == HALF_WORD_SIZE)
+    {
+        transferSize = 2;
+    } else if(mode == WORD_SIZE)
+    {
+        transferSize = 4;
     }
 
     // Compute the bit sizes of different fields
@@ -225,14 +238,14 @@ service:
     if(we == READ)
     {
         // Service the read
-        memcpy((void *) data, (void *) ((byte *) cache[set].block[block].data + offset), sizeof(word));
+        memcpy((void *) data, (void *) ((byte *) cache[set].block[block].data + offset), transferSize);
     }
 
     // Otherwise we are writing to memory
     else
     {
         // Service the write
-        memcpy((void *) ((byte *) cache[set].block[block].data + offset), (void *) data, sizeof(word));
+        memcpy((void *) ((byte *) cache[set].block[block].data + offset), (void *) data, transferSize);
 
         // If the replacement policy is write through, service dram
         if(memory_sync_policy == WRITE_THROUGH)
