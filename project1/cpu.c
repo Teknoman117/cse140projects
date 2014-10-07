@@ -175,16 +175,16 @@ void disassemble_inst(word inst)
     sprintf(buffer, "lui\t$%u, 0x%x\n", getRt(inst), getUImmed(inst));
     break;
   case 32: /* lb */
-    sprintf(buffer, "Unsupported instruction, lb\n");
+    sprintf(buffer, "lb\t$%u, %d($%u)\n", getRt(inst), getSImmed(inst), getRs(inst));
     break;
   case 36: /* lbu */
-    sprintf(buffer, "Unsupported instruction, lbu\n");
+    sprintf(buffer, "lbu\t$%u, %d($%u)\n", getRt(inst), getSImmed(inst), getRs(inst));
     break;
   case 35: /* lw    */
     sprintf(buffer, "lw\t$%u, %d($%u)\n", getRt(inst), getSImmed(inst), getRs(inst));
     break;
   case 40: /* sb */
-    sprintf(buffer, "Unsupported instruction, sb\n");
+    sprintf(buffer, "sb\t$%u, %d($%u)\n", getRt(inst), getSImmed(inst), getRs(inst));
     break;
   case 43: /* sw    */
     sprintf(buffer, "sw\t$%u, %d($%u)\n", getRt(inst), getSImmed(inst), getRs(inst));
@@ -313,19 +313,24 @@ void execute_inst(word inst)
     rt = getUImmed(inst) << 16;
     break;
   case 32: /* lb */
-    sprintf(buffer, "Unsupported instruction, lb\n");
+    accessMemory(rs + getSImmed(inst), (byte *) &rt, BYTE_SIZE, READ);
+    if(rt & 0x00000080)
+    {
+      rt |= 0xFFFFFF00;
+    }
     break;
   case 36: /* lbu */
-    sprintf(buffer, "Unsupported instruction, lbu\n");
+    accessMemory(rs + getSImmed(inst), (byte *) &rt, BYTE_SIZE, READ);
+    rt &= 0x000000FF;
     break;
   case 35: /* lw */
-    accessMemory(rs + getSImmed(inst), &rt, READ);
+    accessMemory(rs + getSImmed(inst), (byte *) &rt, WORD_SIZE, READ);
     break;
   case 40: /* sb */
-    sprintf(buffer, "Unsupported instruction, sb\n");
+    accessMemory(rs + getSImmed(inst), (byte *) &rt, BYTE_SIZE, WRITE);
     break;
   case 43: /* sw */
-    accessMemory(rs + getSImmed(inst), &rt, WRITE);
+    accessMemory(rs + getSImmed(inst), (byte *) &rt, WORD_SIZE, WRITE);
     break;
   case 63:
     stop_run();
@@ -355,7 +360,7 @@ void step_processor()
   flush_drawlist();
 
   /* Fetch Instruction */
-  accessMemory(PC, &inst, READ);
+  accessMemory(PC, (byte *) &inst, WORD_SIZE, READ);
   inst = ntohl(inst);
 
   /* Print PC */
