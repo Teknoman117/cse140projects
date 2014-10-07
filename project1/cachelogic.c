@@ -197,7 +197,7 @@ load:
         }
 
         // Perform load from dram
-        accessDRAMWrapper(addr, (byte *) cache[set].block[block].data, block_size, READ);
+        accessDRAMWrapper(addr & ~oMask, (byte *) cache[set].block[block].data, block_size, READ);
         cache[set].block[block].valid = VALID;
         cache[set].block[block].dirty = VIRGIN;
         cache[set].block[block].tag = tag;
@@ -222,7 +222,8 @@ service:
             // If the replacement policy is write through, service dram
             if(memory_sync_policy == WRITE_THROUGH)
             {
-                accessDRAMWrapper(addr, (byte *) cache[set].block[block].data, block_size, WRITE);
+                // We need to set the offset to zero to load the whole row
+                accessDRAMWrapper(addr & ~oMask, (byte *) cache[set].block[block].data, block_size, WRITE);
             }
 
             // Otherwise we have dirty memory
