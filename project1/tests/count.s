@@ -1,4 +1,3 @@
-# Initialize fibinocci sequence
 count:
     sw $t0, 0($s0)
     addiu $s0, $s0, 4

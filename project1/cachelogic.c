@@ -108,8 +108,17 @@ unsigned int blockToReplace(unsigned int set)
     // least recently used
     else
     {
-        // IMPLEMENT
-        assert(0);
+        unsigned int greatest = 0;
+        unsigned int block = 0;
+        for(int i = 0; i < assoc; i++)
+        {
+            if(cache[set].block[i].lru.value > greatest)
+            {
+                block = i;
+                greatest = cache[set].block[i].lru.value;
+            }
+        }
+        return block;
     }
 
     return 0xFFFFFFFF;
@@ -200,14 +209,23 @@ load:
     cache[set].block[block].dirty = VIRGIN;
     cache[set].block[block].tag = tag;
     cache[set].block[block].accessCount = 0;
+    cache[set].block[block].lru.value = 0;
 
 service:
+
+    // Modify usage information
+    cache[set].block[block].accessCount++;
+    for(int i = 0; i < assoc; i++)
+    {
+        cache[set].block[i].lru.value++;
+    }
+    cache[set].block[block].lru.value = 0;
+
     // If we are reading from the memory
     if(we == READ)
     {
         // Service the read
         memcpy((void *) data, (void *) ((byte *) cache[set].block[block].data + offset), sizeof(word));
-        cache[set].block[block].accessCount++;
     }
 
     // Otherwise we are writing to memory
@@ -215,7 +233,6 @@ service:
     {
         // Service the write
         memcpy((void *) ((byte *) cache[set].block[block].data + offset), (void *) data, sizeof(word));
-        cache[set].block[block].accessCount++;
 
         // If the replacement policy is write through, service dram
         if(memory_sync_policy == WRITE_THROUGH)
