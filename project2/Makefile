@@ -1,19 +1,20 @@
 CC = gcc -std=gnu99
 CXX = g++ -std=c++11
 
-CFLAGS = -msse4 -O3 -pipe -fno-omit-frame-pointer
+CFLAGS = -g -msse4 -O3 -pipe -fno-omit-frame-pointer -fopenmp
 #CFLAGS = -pipe -fno-omit-frame-pointer
 CXXFLAGS = $(CFLAGS)
+LDFLAGS = -fopenmp
 
 all:	bench-naive bench-optimize
 
 #naive
 bench-naive: benchmark.o sgemm-naive.o
-	$(CXX) -o $@ benchmark.o sgemm-naive.o
+	$(CXX) $(LDFLAGS) -o $@ benchmark.o sgemm-naive.o
 
 #optimize
 bench-optimize: benchmark.o sgemm-optimize.o
-	$(CXX) -o $@ benchmark.o sgemm-optimize.o
+	$(CXX) $(LDFLAGS) -o $@ benchmark.o sgemm-optimize.o
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) $<

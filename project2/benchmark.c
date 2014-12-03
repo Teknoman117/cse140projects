@@ -22,8 +22,8 @@ void sgemm_reference( int m, int n, float *A, float *C )
 	C[i+j*n] += A[i+k*(n)] * A[j*(n+1)+k*(n)];*/
   #pragma omp parallel for
   for( int i = 0; i < n; i++)
-    for( int j = 0; j < n; j++)
-      for( int k = 0; k < m; k++)
+    for( int k = 0; k < m; k++)
+      for( int j = 0; j < n; j++)
         C[j+(i*n)] += A[j+(k*n)] * A[i+(k*n)];
 }
 
