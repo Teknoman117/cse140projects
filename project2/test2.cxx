@@ -30,31 +30,115 @@ inline void Transpose(float * A, float * B, int m, int n)
       B[(i*n) + j] = A[i + (j*m)];
 }
 
+// Computes C = A * transpose(A).  m and n must be multiples of 4. A is row major, C is column major
+inline void atimestransposea( int m, int n, float *A, float *C )
+{
+    // Iterate through the columns of the matrix
+    for(size_t i = 0; i < m; i++)
+    {
+        // Iterate through the rows of the matrix
+        for(size_t j = 0; j < m; j += 4)
+        {
+            // Summation register for these elements
+            __m128 result = _mm_set1_ps(0.0f);
+
+            // Iterate over the elements in a row
+            for(size_t k = 0; k < n; k += 4)
+            {
+                // Load columns of left matrix into sse registers
+                __m128 aColumn0 = _mm_load_ps(A + ((j+0)*m) + k);
+                __m128 aColumn1 = _mm_load_ps(A + ((j+1)*m) + k);
+                __m128 aColumn2 = _mm_load_ps(A + ((j+2)*m) + k);
+                __m128 aColumn3 = _mm_load_ps(A + ((j+3)*m) + k);
+
+                // Transpose these columns
+                _MM_TRANSPOSE4_PS(aColumn0, aColumn1, aColumn2, aColumn3);
+
+                // Multiply each column by the cooresponding entry in the right matrix
+                __m128 p0 = aColumn0 * _mm_load1_ps(A + (i*m) + (k+0));
+                __m128 p1 = aColumn1 * _mm_load1_ps(A + (i*m) + (k+1));
+                __m128 p2 = aColumn2 * _mm_load1_ps(A + (i*m) + (k+2));
+                __m128 p3 = aColumn3 * _mm_load1_ps(A + (i*m) + (k+3));
+
+                // Store the summations
+                result += p0;
+                result += p1;
+                result += p2;
+                result += p3;
+            }
+
+            // Store result
+            _mm_store_ps(C + (i*m) + j, result);
+        }
+    }
+}
+
+// Multiply A matrix by its transpose
+extern "C" void sgemm( int m, int n, float *A, float *C )
+{
+    // Recompute boundaries of the matrix (align to 4, for sse)
+    int mPadded = (m & ~0x03) + ((m & 0x03) ? 4 : 0);
+    int nPadded = (n & ~0x03) + ((n & 0x03) ? 4 : 0);
+
+    // Compute the transpose of the matrix
+    float *At = (float *) malloc (sizeof(float) * mPadded * nPadded);
+    memset((void *) At, 0, sizeof(float) * mPadded * nPadded);
+    Transpose(A, At, m, n, mPadded, nPadded);
+
+    // The matrix does not have favorable dimensions
+    if((m % 4) || (n % 4))
+    {
+        // Allocate new, padded matrices
+        float *Cpadded = (float *) malloc (sizeof(float) * mPadded * mPadded);
+        memset((void *) Cpadded, 0, sizeof(float) * mPadded * mPadded);
+
+        // Perform multiplication
+        atimestransposea(mPadded, nPadded, At, Cpadded);
+
+        // Perform a copy of Cpadded into C matrix (optimized for column major matrices)
+        for(int j = 0; j < m; j++)
+            memcpy((void *) (C + (m*j)), (void *) (Cpadded + (mPadded*j)), sizeof(float) * m);
+
+        // Cleanup
+        free(Cpadded);
+    }
+
+    // Otherwise, this is an optimal case where padding is not required
+    else
+    {
+        atimestransposea(m, n, At, C);
+    }
+
+    // Release the transpose matrix
+    free(At);
+}
+
 // Test
 int main ()
 {
-  size_t m = 4;
+  size_t m = 8;
   size_t n = 4;
-  float  matrixA[] = {1.0f, 2.0f, 3.0f, 4.0f,
-                      5.0f, 6.0f, 7.0f, 8.0f,
-                      9.0f, 10.0f, 11.0f, 12.0f,
-                      13.0f, 14.0f, 15.0f, 16.0f};
+  float  matrixA[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f,
+                      9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f,
+                      1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f,
+                      9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f};
   float *A  = (float *) matrixA;
-  float *At = (float *) malloc (sizeof(float) * m * n);
+  float  matrixAt[m*n];
+  float *At = (float *) matrixAt;
   float  matrixC[m*m];
   float *C  = (float *) matrixC;
 
   // Print the source matrix
   std::cout << "Computing C = A * transpose(A)" << std::endl;
   std::cout << "A []:\t";
-  for(size_t i = 0; i < m * m; i++)
+  for(size_t i = 0; i < m * n; i++)
     std::cout << matrixA[i] << "\t";
   std::cout << std::endl;
 
   // Compute and print the transpose matrix
   Transpose(A, At, m, n, m, n);
   std::cout << "A'[]:\t";
-  for(size_t i = 0; i < m * m; i++)
+  for(size_t i = 0; i < m * n; i++)
     std::cout << At[i] << "\t";
   std::cout << std::endl;
 
@@ -70,45 +154,7 @@ int main ()
   memset((void *) C, 0, sizeof(float) * m * m);
 
   // Iterate through the columns of the matrix
-  #pragma omp parallel for
-  for(size_t i = 0; i < m; i++)
-  {
-    // Iterate through the rows of the matrix
-    for(size_t j = 0; j < m; j += 4)
-    {
-      // Summation register for these elements
-      __m128 result = _mm_set1_ps(0.0f);
-
-      // Iterate over the elements in a row
-      for(size_t k = 0; k < n; k += 4)
-      {
-          // Load columns of left matrix into sse registers
-          __m128 aColumn0 = _mm_load_ps(A + ((k+0)*m) + j);
-          __m128 aColumn1 = _mm_load_ps(A + ((k+1)*m) + j);
-          __m128 aColumn2 = _mm_load_ps(A + ((k+2)*m) + j);
-          __m128 aColumn3 = _mm_load_ps(A + ((k+3)*m) + j);
-
-          // Multiply each column by the cooresponding entry in the right matrix
-          /*__m128 p0 = aColumn0 * _mm_load1_ps(At + (i*n) + (k+0));
-          __m128 p1 = aColumn1 * _mm_load1_ps(At + (i*n) + (k+1));
-          __m128 p2 = aColumn2 * _mm_load1_ps(At + (i*n) + (k+2));
-          __m128 p3 = aColumn3 * _mm_load1_ps(At + (i*n) + (k+3));*/
-          __m128 p0 = aColumn0 * _mm_load1_ps(A + ((k+0)*m) + i);
-          __m128 p1 = aColumn1 * _mm_load1_ps(A + ((k+1)*m) + i);
-          __m128 p2 = aColumn2 * _mm_load1_ps(A + ((k+2)*m) + i);
-          __m128 p3 = aColumn3 * _mm_load1_ps(A + ((k+3)*m) + i);
-
-          // Store the summations
-          result += p0;
-          result += p1;
-          result += p2;
-          result += p3;
-      }
-
-      // Store result
-      _mm_store_ps(C + (i*m) + j, result);
-    }
-  }
+  sgemm(m,n,A,C);
 
   // Output resulting arrays
   std::cout << "Result using SSE optimized algorithm" << std::endl;
