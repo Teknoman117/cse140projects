@@ -2,70 +2,84 @@
 #include <cstdlib>
 #include <cstring>
 
-// In order to effectively use
+#include <xmmintrin.h>
 
-// Transpose a matrix
-inline void Transpose(float * A, float * B, int m, int n, int bmPadded)
+// Computes C = A * transpose(A).  m and n must be multiples of 4
+inline void atimestransposea( int m, int n, float *A, float *C )
 {
-    // Convert from column major to row major
-    for(size_t i = 0; i < n; i++)
+  // Iterate through the columns of the matrix
+  //#pragma omp parallel for
+  for(size_t i = 0; i < m; i++)
+  {
+    // Iterate through the rows of the matrix
+    for(size_t j = 0; j < m; j += 4)
     {
-        for(size_t j = 0; j < m; j++)
-        {
-            B[(i*bmPadded) + j] = A[i + (j*n)];
-        }
+      // Summation register for these elements
+      __m128 result = _mm_set1_ps(0.0f);
+
+      // Iterate over the elements in a row
+      for(size_t k = 0; k < n; k += 4)
+      {
+        // Load columns of left matrix into sse registers
+        __m128 aColumn0 = _mm_load_ps(A + ((k+0)*m) + j);
+        __m128 aColumn1 = _mm_load_ps(A + ((k+1)*m) + j);
+        __m128 aColumn2 = _mm_load_ps(A + ((k+2)*m) + j);
+        __m128 aColumn3 = _mm_load_ps(A + ((k+3)*m) + j);
+
+        // Multiply each column by the cooresponding entry in the right matrix
+        __m128 p0 = aColumn0 * _mm_load1_ps(A + ((k+0)*m) + i);
+        __m128 p1 = aColumn1 * _mm_load1_ps(A + ((k+1)*m) + i);
+        __m128 p2 = aColumn2 * _mm_load1_ps(A + ((k+2)*m) + i);
+        __m128 p3 = aColumn3 * _mm_load1_ps(A + ((k+3)*m) + i);
+
+        // Store the summations
+        result += p0;
+        result += p1;
+        result += p2;
+        result += p3;
+      }
+
+      // Store result
+      _mm_store_ps(C + (i*m) + j, result);
     }
+  }
 }
 
-// Man why the fuck is this matrix in column major order god damn it.
-// since we want to multiply A by transpose(A), the operands would all
-// be in sequential memory.  Fuck.
-
 // Multiply A matrix by its transpose
-extern "C" void sgemm( int m, int n, int d, float *A, float *C )
+extern "C" void sgemm( int m, int n, float *A, float *C )
 {
-    // Recompute boundaries of the matrix (align to 4, for sse)
-    int mPadded = (m & ~0x03) + ((m & 0x03) ? 4 : 0);
-    int nPadded = (n & ~0x03) + ((n & 0x03) ? 4 : 0);
-
-    // Allocate and transpose the source matrix (to get it column major)
-    float * nA = (float *) __builtin_assume_aligned(aligned_alloc(16, sizeof(float) * mPadded * nPadded), 16);
-    memset((void *) nA, 0, sizeof(float) * mPadded * nPadded);
-    Transpose(A, nA, m, n, mPadded);
-
-    // "j" will be the column used in rmatrix
-    #pragma omp parallel for
-    for(size_t j = 0; j < n; j++)
+    // The matrix does not have favorable dimensions
+    if((m % 4) || (n % 4))
     {
-        // "i" will be the row used in lmatrix
-        for(size_t i = 0; i < n; i++)
-        {
-            // This loop tends to favor the columns of the destination matrix
-            // and the rows of the transpose matrix in cache
+        // Recompute boundaries of the matrix (align to 4, for sse)
+        int mPadded = (m & ~0x03) + ((m & 0x03) ? 4 : 0);
+        int nPadded = (n & ~0x03) + ((n & 0x03) ? 4 : 0);
 
-            // Because we are multiplying by A by transpose(A), on a row
-            // major matrix, the columns in the transpose are the sequential memory
-            // rows of the first
+        // Allocate new, padded matrices
+        float *Apadded = (float *) malloc (sizeof(float) * mPadded * nPadded);
+        float *Cpadded = (float *) malloc (sizeof(float) * mPadded * mPadded);
+        memset((void *) Apadded, 0, sizeof(float) * mPadded * nPadded);
+        memset((void *) Cpadded, 0, sizeof(float) * mPadded * mPadded);
 
-            // Possibly write an inline assembly piece of code that
-            // does 4 destination results together.  Manly due to the
-            // sequential nature of adding
+        // Perform copy of A into padded matrix (optimized for column major matrices, hopefully we get accelerated memcpy)
+        for(int j = 0; j < n; j++)
+            memcpy((void *) (Apadded + (mPadded*j)), (void *) (A + (m*j)), sizeof(float) * m);
 
-            // Compute the value in the destination matrix
-            float t = 0.0f;
-            for(size_t k = 0; k < m; k += 4)
-            {
-                t += nA[(i*mPadded) + k + 0] * nA[(j*mPadded) + k + 0];
-                t += nA[(i*mPadded) + k + 1] * nA[(j*mPadded) + k + 1];
-                t += nA[(i*mPadded) + k + 2] * nA[(j*mPadded) + k + 2];
-                t += nA[(i*mPadded) + k + 3] * nA[(j*mPadded) + k + 3];
-            }
+        // Perform multiplication
+        atimestransposea(mPadded, nPadded, Apadded, Cpadded);
 
-            // store in destination matrix
-            C[i + (j * n)] = t;
-        }
+        // Perform a copy of Cpadded into C matrix (optimized for column major matrices)
+        for(int j = 0; j < m; j++)
+            memcpy((void *) (C + (m*j)), (void *) (Cpadded + (mPadded*j)), sizeof(float) * m);
+
+        // Cleanup
+        free(Apadded);
+        free(Cpadded);
     }
 
-    // Destroy working memory
-    //free(nA);
+    // Otherwise, this is an optimal case where padding is not required
+    else
+    {
+        atimestransposea(m, n, A, C);
+    }
 }
