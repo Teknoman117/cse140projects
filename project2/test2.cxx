@@ -45,26 +45,29 @@ inline void atimestransposea( int m, int n, float *A, float *C )
             // Iterate over the elements in a row
             for(size_t k = 0; k < n; k += 4)
             {
-                // Load columns of left matrix into sse registers
-                __m128 aColumn0 = _mm_load_ps(A + ((j+0)*m) + k);
-                __m128 aColumn1 = _mm_load_ps(A + ((j+1)*m) + k);
-                __m128 aColumn2 = _mm_load_ps(A + ((j+2)*m) + k);
-                __m128 aColumn3 = _mm_load_ps(A + ((j+3)*m) + k);
+                // Load r-matrix column
+                __m128 aColumn = _mm_load_ps(A + (i*n) + k);
 
-                // Transpose these columns
-                _MM_TRANSPOSE4_PS(aColumn0, aColumn1, aColumn2, aColumn3);
+                // Load l-matrix rows
+                __m128 aRow0 = _mm_load_ps(A + ((j+0)*n) + k);
+                __m128 aRow1 = _mm_load_ps(A + ((j+1)*n) + k);
+                __m128 aRow2 = _mm_load_ps(A + ((j+2)*n) + k);
+                __m128 aRow3 = _mm_load_ps(A + ((j+3)*n) + k);
 
-                // Multiply each column by the cooresponding entry in the right matrix
-                __m128 p0 = aColumn0 * _mm_load1_ps(A + (i*m) + (k+0));
-                __m128 p1 = aColumn1 * _mm_load1_ps(A + (i*m) + (k+1));
-                __m128 p2 = aColumn2 * _mm_load1_ps(A + (i*m) + (k+2));
-                __m128 p3 = aColumn3 * _mm_load1_ps(A + (i*m) + (k+3));
+                // Multiply each row by the column
+                aRow0 = aRow0 * aColumn;
+                aRow1 = aRow1 * aColumn;
+                aRow2 = aRow2 * aColumn;
+                aRow3 = aRow3 * aColumn;
+
+                // Transpose the row so that we can use vector add
+                _MM_TRANSPOSE4_PS(aRow0, aRow1, aRow2, aRow3);
 
                 // Store the summations
-                result += p0;
-                result += p1;
-                result += p2;
-                result += p3;
+                result += aRow0;
+                result += aRow1;
+                result += aRow2;
+                result += aRow3;
             }
 
             // Store result
