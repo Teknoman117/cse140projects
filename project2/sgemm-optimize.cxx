@@ -4,7 +4,7 @@
 
 #include <xmmintrin.h>
 
-//for threading
+/*//for threading
 #define THREADS 8
 
 #include <functional>
@@ -94,7 +94,7 @@ public:
 };
 
 // Pool of available threads to schedule work on
-static workqueue threadpool;
+static workqueue threadpool;*/
 
 // Transpose a matrix (respecting the padding)
 inline void Transpose(float * A, float * B, int m, int n, int bmPadded, int bnPadded)
@@ -105,7 +105,7 @@ inline void Transpose(float * A, float * B, int m, int n, int bmPadded, int bnPa
 }
 
 // Computes C = A * transpose(A).  m and n must be multiples of 4. A is row major, C is column major
-inline void atimestransposea( int m, int n, float *A, float *C )
+void atimestransposea( int m, int n, float *A, float *C )
 {
     // Iterate through the columns of the matrix
     //#pragma omp parallel for
@@ -124,16 +124,10 @@ inline void atimestransposea( int m, int n, float *A, float *C )
                 __m128 aColumn = _mm_load_ps(A + (i*n) + k);
 
                 // Load l-matrix rows
-                __m128 aRow0 = _mm_load_ps(A + ((j+0)*n) + k);
-                __m128 aRow1 = _mm_load_ps(A + ((j+1)*n) + k);
-                __m128 aRow2 = _mm_load_ps(A + ((j+2)*n) + k);
-                __m128 aRow3 = _mm_load_ps(A + ((j+3)*n) + k);
-
-                // Multiply each row by the column
-                aRow0 = aRow0 * aColumn;
-                aRow1 = aRow1 * aColumn;
-                aRow2 = aRow2 * aColumn;
-                aRow3 = aRow3 * aColumn;
+                __m128 aRow0 = _mm_load_ps(A + ((j+0)*n) + k) * aColumn;
+                __m128 aRow1 = _mm_load_ps(A + ((j+1)*n) + k) * aColumn;
+                __m128 aRow2 = _mm_load_ps(A + ((j+2)*n) + k) * aColumn;
+                __m128 aRow3 = _mm_load_ps(A + ((j+3)*n) + k) * aColumn;
 
                 // Transpose the row so that we can use vector add
                 _MM_TRANSPOSE4_PS(aRow0, aRow1, aRow2, aRow3);
@@ -152,7 +146,7 @@ inline void atimestransposea( int m, int n, float *A, float *C )
 }
 
 // Computes C = A * transpose(A).  m and n must be multiples of 4
-inline void atimestransposea_threaded( int m, int n, float *A, float *C )
+/*inline void atimestransposea_threaded( int m, int n, float *A, float *C )
 {
     // Create a mutex to lock the critical sections of the model loader worker threads
     semaphore * deadThreads = new semaphore();
@@ -181,32 +175,23 @@ inline void atimestransposea_threaded( int m, int n, float *A, float *C )
                     // Iterate over the elements in a row
                     for(size_t k = 0; k < n; k += 4)
                     {
-                        // Load columns of left matrix into sse registers
-                        __m128 aColumn0 = _mm_load_ps(A + ((j+0)*n) + k);
-                        __m128 aColumn1 = _mm_load_ps(A + ((j+1)*n) + k);
-                        __m128 aColumn2 = _mm_load_ps(A + ((j+2)*n) + k);
-                        __m128 aColumn3 = _mm_load_ps(A + ((j+3)*n) + k);
+                        // Load r-matrix column
+                        __m128 aColumn = _mm_load_ps(A + (i*n) + k);
 
-                        // Transpose these columns
-                        _MM_TRANSPOSE4_PS(aColumn0, aColumn1, aColumn2, aColumn3);
+                        // Load l-matrix rows
+                        __m128 aRow0 = _mm_load_ps(A + ((j+0)*n) + k) * aColumn;
+                        __m128 aRow1 = _mm_load_ps(A + ((j+1)*n) + k) * aColumn;
+                        __m128 aRow2 = _mm_load_ps(A + ((j+2)*n) + k) * aColumn;
+                        __m128 aRow3 = _mm_load_ps(A + ((j+3)*n) + k) * aColumn;
 
-                        // Load rows
-                        __m128 r0 = _mm_load1_ps(A + (i*n) + (k+0));
-                        __m128 r1 = _mm_load1_ps(A + (i*n) + (k+1));
-                        __m128 r2 = _mm_load1_ps(A + (i*n) + (k+2));
-                        __m128 r3 = _mm_load1_ps(A + (i*n) + (k+3));
-
-                        // Multiply each column by the cooresponding entry in the right matrix
-                        __m128 p0 = aColumn0 * r0;
-                        __m128 p1 = aColumn1 * r1;
-                        __m128 p2 = aColumn2 * r2;
-                        __m128 p3 = aColumn3 * r3;
+                        // Transpose the row so that we can use vector add
+                        _MM_TRANSPOSE4_PS(aRow0, aRow1, aRow2, aRow3);
 
                         // Store the summations
-                        result += p0;
-                        result += p1;
-                        result += p2;
-                        result += p3;
+                        result += aRow0;
+                        result += aRow1;
+                        result += aRow2;
+                        result += aRow3;
                     }
 
                     // Store result
@@ -224,7 +209,7 @@ inline void atimestransposea_threaded( int m, int n, float *A, float *C )
     {
         deadThreads->decrease();
     }
-}
+}*/
 
 // Multiply A matrix by its transpose
 extern "C" void sgemm( int m, int n, float *A, float *C )
@@ -241,15 +226,14 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
     // The matrix does not have favorable dimensions
     if((m % 4) || (n % 4))
     {
-        // Allocate new, padded matrices
+        // Allocate padded destination matrix
         float *Cpadded = (float *) malloc (sizeof(float) * mPadded * mPadded);
-        memset((void *) Cpadded, 0, sizeof(float) * mPadded * mPadded);
 
         // Perform multiplication
         atimestransposea(mPadded, nPadded, At, Cpadded);
-        //atimestransposea_threaded(mPadded, nPadded, At, Cpadded);
 
-        // Perform a copy of Cpadded into C matrix (optimized for column major matrices)
+        // Perform a copy of Cpadded into C matrix (optimized for column major matrices,
+        // hopefully we'll get SSE accelerated memcpy)
         for(int j = 0; j < m; j++)
             memcpy((void *) (C + (m*j)), (void *) (Cpadded + (mPadded*j)), sizeof(float) * m);
 
@@ -261,7 +245,6 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
     else
     {
         atimestransposea(m, n, At, C);
-        //atimestransposea_threaded(m, n, At, C);
     }
 
     // Release the transpose matrix
