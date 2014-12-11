@@ -6,8 +6,8 @@
 #include <xmmintrin.h>
 
 // Index into an MxN matrix.  r = row #, c = column #
-#define ROW_MAJOR(r,c,M,N)    ((r)*N)+(c)
-#define COLUMN_MAJOR(r,c,M,N) ((c)*M)+(r)
+#define ROW_MAJOR(r,c,M,N)    ((r)*(N))+(c)
+#define COLUMN_MAJOR(r,c,M,N) ((c)*(M))+(r)
 #define MIN(a,b) (a<b)?a:b
 
 /* print row major matrix */
@@ -94,16 +94,6 @@ void block_multiply_accumulate( float *A, float *B, float *C )
     _mm_store_ps(C + 12, destination3);
 }
 
-/* method provided by the code */
-void sgemm_reference( int m, int n, float *A, float *C)
-{
-    #pragma omp parallel for
-    for( int i = 0; i < m; i++ )
-        for( int k = 0; k < n; k++ )
-            for( int j = 0; j < m; j++ )
-                C[i+j*m] += A[i+k*m] * A[j+k*m];
-}
-
 // Multiply A matrix by its transpose
 extern "C" void sgemm( int m, int n, float *A, float *C )
 {
@@ -125,7 +115,7 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
         destination_blocks[i] = (float *) calloc (16, sizeof(float));
 
     // Perform source matrix allocation
-    std::cout << "------- SOURCE MATRIX ---------" << std::endl;
+    //std::cout << "------- SOURCE MATRIX ---------" << std::endl;
     for(int i = 0; i < mBlocks; i++)   // i = row
     {
         for(int j = 0; j < nBlocks; j++) // j = column
@@ -148,17 +138,17 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
                 }
 
             // DEBUG!!!
-            std::cout << "Local block size: " << mLocalBlock << "," << nLocalBlock << std::endl;
-            std::stringstream name;
-            name << "A(" << i << "," << j << "):" << std::ends;
-            print_rowmajor(block, 4, 4, name.str());
-            std::cout << std::endl;
+            //std::cout << "Local block size: " << mLocalBlock << "," << nLocalBlock << std::endl;
+            //std::stringstream name;
+            //name << "A(" << i << "," << j << "):" << std::ends;
+            //print_rowmajor(block, 4, 4, name.str());
+            //std::cout << std::endl;
         }
     }
-    std::cout << "-------------------------------" << std::endl << std::endl;
+    //std::cout << "-------------------------------" << std::endl << std::endl;
 
     // Perform source matrix allocation
-    /*std::cout << "------- TRANSPOSE MATRIX ---------" << std::endl;
+    //std::cout << "------- TRANSPOSE MATRIX ---------" << std::endl;
     for(int i = 0; i < nBlocks; i++)   // i = row
     {
         for(int j = 0; j < mBlocks; j++) // j = column
@@ -168,27 +158,27 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
             transpose_blocks[ROW_MAJOR(i,j,nBlocks,mBlocks)] = block;
 
             // Compute the dimensions of this block
-            int mLocalBlock = MIN(n - (4 * i), 4);
-            int nLocalBlock = MIN(m - (4 * j), 4);
+            int nLocalBlock = MIN(n - (4 * i), 4);
+            int mLocalBlock = MIN(m - (4 * j), 4);
 
             // Copy and transpose, ii = row, jj = column
-            for(int ii = 0; ii < mLocalBlock; ii++)
-                for(int jj = 0; jj < nLocalBlock; jj++)
+            for(int ii = 0; ii < nLocalBlock; ii++)
+                for(int jj = 0; jj < mLocalBlock; jj++)
                 {
-                    int bIdx = ROW_MAJOR(ii,jj,4,4);
-                    int sIdx = COLUMN_MAJOR((i*4)+ii,(j*4)+jj,m,n);
+                    int bIdx = COLUMN_MAJOR(ii,jj,4,4);
+                    int sIdx = ROW_MAJOR((i*4)+ii,(j*4)+jj,n,m);
                     block[bIdx] = A[sIdx];
                 }
 
             // DEBUG!!!
-            std::cout << "Local block size: " << mLocalBlock << "," << nLocalBlock << std::endl;
-            std::stringstream name;
-            name << "A(" << i << "," << j << "):" << std::ends;
-            print_rowmajor(block, 4, 4, name.str());
-            std::cout << std::endl;
+            //std::cout << "Local block size: " << mLocalBlock << "," << nLocalBlock << std::endl;
+            //std::stringstream name;
+            //name << "A(" << i << "," << j << "):" << std::ends;
+            //print_columnmajor(block, 4, 4, name.str());
+            //std::cout << std::endl;
         }
     }
-    std::cout << "-------------------------------" << std::endl;
+    //std::cout << "-------------------------------" << std::endl << std::endl;
 
     // Perform multiplication (i = row, j = column, k = element)
     for(int i = 0; i < mBlocks; i++)
@@ -206,7 +196,60 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
                 block_multiply_accumulate(source_blocks[sIdx], transpose_blocks[tIdx], destination_blocks[dIdx]);
             }
         }
-    }*/
+    }
+
+    // Display results
+    //std::cout << "------- RESULT MATRIX ---------" << std::endl;
+
+    // Glue everything together, i = row, j = column
+    for(int j = 0; j < mBlocks; j++)
+    {
+        for(int i = 0; i < mBlocks; i++)
+        {
+            // Get the block
+            float *block = destination_blocks[COLUMN_MAJOR(i,j,mBlocks,mBlocks)];
+
+            // Compute the dimensions of this block
+            int mLocalBlock = MIN(m - (4 * i), 4);
+            int nLocalBlock = MIN(m - (4 * j), 4);
+
+            // Iterate through columns
+            for(int jj = 0; jj < nLocalBlock; jj++)
+            {
+                memcpy((void *) (C + COLUMN_MAJOR((i*4),(j*4)+jj,m,m)), (void *) (block + COLUMN_MAJOR(0,jj,4,4)), sizeof(float)*mLocalBlock);
+            }
+
+            // Display the block
+            //std::stringstream name;
+            //name << "C(" << i << "," << j << "):" << std::ends;
+            //print_columnmajor(block, 4, 4, name.str());
+            //std::cout << std::endl;
+
+            // Free the block
+            free(block);
+        }
+    }
+    //std::cout << "-------------------------------" << std::endl << std::endl;
+
+    // Free memory
+    for(int i = 0; i < mBlocks * nBlocks; i++)
+    {
+        free(source_blocks[i]);
+        free(transpose_blocks[i]);
+    }
+    free(source_blocks);
+    free(transpose_blocks);
+    free(destination_blocks);
+}
+
+/* method provided by the code */
+void sgemm_reference( int m, int n, float *A, float *C)
+{
+    #pragma omp parallel for
+    for( int i = 0; i < m; i++ )
+        for( int k = 0; k < n; k++ )
+            for( int j = 0; j < m; j++ )
+                C[i+j*m] += A[i+k*m] * A[j+k*m];
 }
 
 // Test
@@ -218,11 +261,16 @@ int main ()
                       9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f,
                       1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f,
                       9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f};*/
-  float  matrixA[] = {1.0f, 2.0f, 3.0f, 4.0f, 69.f,
+  float  matrixA[] = {1.0f, 2.0f, 3.0f, 4.0f, 24.f,
                       5.0f, 6.0f, 7.0f, 8.0f, 69.f,
                       9.0f, 10.0f, 11.0f, 12.0f, 69.f,
                       13.0f, 14.0f, 15.0f, 16.0f, 69.f,
-                      69.f, 69.f, 69.f, 69.f, 69.f};
+                      42.f, 69.f, 69.f, 69.f, 69.f};
+  /*float  matrixA[] = {1.0f, 2.0f, 3.0f, 4.0f,
+                      5.0f, 6.0f, 7.0f, 8.0f,
+                      9.0f, 10.0f, 11.0f, 12.0f,
+                      13.0f, 14.0f, 15.0f, 16.0f,
+                      69.f, 69.f, 69.f, 69.f, 69.f};*/
   float *A  = (float *) matrixA;
   float  matrixC[m*m];
   float *C  = (float *) matrixC;
@@ -249,8 +297,8 @@ int main ()
   //block_multiply_accumulate(At, At, C);
 
   // Output resulting arrays
-  //std::cout << "Result using SSE optimized algorithm" << std::endl;
-  //print_columnmajor(C, m, m, "C []:");
+  std::cout << "Result using SSE optimized algorithm" << std::endl;
+  print_columnmajor(C, m, m, "C []:");
   std::cout << std::endl;
 
   return 0;
