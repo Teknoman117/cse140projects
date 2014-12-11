@@ -219,8 +219,7 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
     int nPadded = (n & ~0x03) + ((n & 0x03) ? 4 : 0);
 
     // Convert from column major to row major and pad for non-divisible-by-4 matrices
-    float *At = (float *) malloc (sizeof(float) * mPadded * nPadded);
-    memset((void *) At, 0, sizeof(float) * mPadded * nPadded);
+    float *At = (float *) calloc (mPadded * nPadded, sizeof(float));
     Transpose(A, At, m, n, mPadded, nPadded);
 
     // The matrix does not have favorable dimensions
