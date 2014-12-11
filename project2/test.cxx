@@ -9,6 +9,13 @@
 #define COLUMN_MAJOR(r,c,M,N) ((c)*(M))+(r)
 #define MIN(a,b) (a<b)?a:b
 
+// Swizzled row major encoding: row0:0-3,row1:0-3,row2:0-3,row3:0-3,row0:4-7
+#define ROW_MAJOR_SWIZZLED_BLOCK(r,c,M,N) ( (((r)&~3)*(N)) + (((c)&~3)<<2) + (((r)%4)<<2) )
+#define ROW_MAJOR_SWIZZLED(r,c,M,N)       ( ROW_MAJOR_SWIZZLED_BLOCK(r,c,M,N) + ((c)%4) )
+
+#define COLUMN_MAJOR_SWIZZLED_BLOCK(r,c,M,N) ( (((c)&~3)*(M)) + (((r)&~3)<<2) + (((c)%4)<<2) )
+#define COLUMN_MAJOR_SWIZZLED(r,c,M,N)       ( COLUMN_MAJOR_SWIZZLED_BLOCK(r,c,M,N) + ((r)%4) )
+
 /* print row major matrix */
 void print_rowmajor(float *A, int m, int n, std::string name)
 {
@@ -17,6 +24,18 @@ void print_rowmajor(float *A, int m, int n, std::string name)
     {
         for(int j = 0; j < n; j++)
             std::cout << "\t" << A[ROW_MAJOR(i,j,m,n)];
+        std::cout << std::endl;
+    }
+}
+
+/* print row major matrix */
+void print_rowmajor_swizzled(float *A, int m, int n, std::string name)
+{
+    std::cout << name;
+    for(int i = 0; i < m; i++)
+    {
+        for(int j = 0; j < n; j++)
+            std::cout << "\t" << A[ROW_MAJOR_SWIZZLED(i,j,m,n)];
         std::cout << std::endl;
     }
 }
@@ -33,6 +52,18 @@ void print_columnmajor(float *A, int m, int n, std::string name)
     }
 }
 
+/* print column major matrix */
+void print_columnmajor_swizzled(float *A, int m, int n, std::string name)
+{
+    std::cout << name;
+    for(int i = 0; i < m; i++)
+    {
+        for(int j = 0; j < n; j++)
+            std::cout << "\t" << A[COLUMN_MAJOR_SWIZZLED(i,j,m,n)];
+        std::cout << std::endl;
+    }
+}
+
 /* method provided by the code */
 void sgemm_reference( int m, int n, float *A, float *C)
 {
@@ -43,24 +74,27 @@ void sgemm_reference( int m, int n, float *A, float *C)
         C[i+j*m] += A[i+k*m] * A[j+k*m];
 }
 
-// Transpose a matrix (respecting the padding)
-inline void Transpose(float * A, float * B, int m, int n, int bmPadded, int bnPadded)
+// Transpose a matrix and swizzle (respecting the padding)
+inline void TransposeSwizzle(float * A, float * B, int m, int n, int bmPadded, int bnPadded)
 {
-  for(size_t i = 0; i < m; i++)
-    for(size_t j = 0; j < n; j++)
-      B[(i*bnPadded) + j] = A[i + (j*m)];
-}
+    // i = row, j = column
+    for(size_t i = 0; i < m; i++)
+        for(size_t j = 0; j < n; j+=4)
+        {
+            // Compute the swizzled address
+            //size_t offset = ((i&(~0x03))*bnPadded) + ((j&(~0x03))*4) + ((i%4)*4);
+            //float *block = B + offset;
+            float *block = B + ROW_MAJOR_SWIZZLED_BLOCK(i,j,bmPadded,bnPadded);
+            size_t len = MIN(4,n-j);
 
-// Transpose a matrix
-inline void Transpose(float * A, float * B, int m, int n)
-{
-  for(size_t i = 0; i < m; i++)
-    for(size_t j = 0; j < n; j++)
-      B[(i*n) + j] = A[i + (j*m)];
+            // Perform copies
+            for(size_t k = 0; k < len; k++)
+                block[k] = A[COLUMN_MAJOR(i,j+k,m,n)];
+        }
 }
 
 // Computes C = A * transpose(A).  m and n must be multiples of 4. A is row major, C is column major
-inline void atimestransposea( int m, int n, float *A, float *C )
+inline void atimestransposea_swizzled( int m, int n, float *A, float *C )
 {
     // Iterate through the columns of the matrix
     for(size_t i = 0; i < m; i++)
@@ -75,13 +109,15 @@ inline void atimestransposea( int m, int n, float *A, float *C )
             for(size_t k = 0; k < n; k += 4)
             {
                 // Load r-matrix column
-                __m128 aColumn = _mm_load_ps(A + (i*n) + k);
+                //__m128 aColumn = _mm_load_ps(A + (i*n) + k);
+                __m128 aColumn = _mm_load_ps(A + COLUMN_MAJOR_SWIZZLED_BLOCK(k,i,n,m));
 
                 // Load l-matrix rows
-                __m128 aRow0 = _mm_load_ps(A + ((j+0)*n) + k);
-                __m128 aRow1 = _mm_load_ps(A + ((j+1)*n) + k);
-                __m128 aRow2 = _mm_load_ps(A + ((j+2)*n) + k);
-                __m128 aRow3 = _mm_load_ps(A + ((j+3)*n) + k);
+                size_t offset = ROW_MAJOR_SWIZZLED_BLOCK(j,k,m,n);
+                __m128 aRow0 = _mm_load_ps(A + offset + 0);
+                __m128 aRow1 = _mm_load_ps(A + offset + 4);
+                __m128 aRow2 = _mm_load_ps(A + offset + 8);
+                __m128 aRow3 = _mm_load_ps(A + offset + 12);
 
                 // Multiply each row by the column
                 aRow0 = aRow0 * aColumn;
@@ -106,26 +142,24 @@ inline void atimestransposea( int m, int n, float *A, float *C )
 }
 
 // Multiply A matrix by its transpose
-extern "C" void sgemm( int m, int n, float *A, float *C )
+extern "C" void sgemm_swizzled( int m, int n, float *A, float *C )
 {
     // Recompute boundaries of the matrix (align to 4, for sse)
     int mPadded = (m & ~0x03) + ((m & 0x03) ? 4 : 0);
     int nPadded = (n & ~0x03) + ((n & 0x03) ? 4 : 0);
 
     // Compute the transpose of the matrix
-    float *At = (float *) malloc (sizeof(float) * mPadded * nPadded);
-    memset((void *) At, 0, sizeof(float) * mPadded * nPadded);
-    Transpose(A, At, m, n, mPadded, nPadded);
+    float *At = (float *) calloc (mPadded * nPadded, sizeof(float));
+    TransposeSwizzle(A, At, m, n, mPadded, nPadded);
 
     // The matrix does not have favorable dimensions
     if((m % 4) || (n % 4))
     {
         // Allocate new, padded matrices
-        float *Cpadded = (float *) malloc (sizeof(float) * mPadded * mPadded);
-        memset((void *) Cpadded, 0, sizeof(float) * mPadded * mPadded);
+        float *Cpadded = (float *) calloc (mPadded * mPadded, sizeof(float));
 
         // Perform multiplication
-        atimestransposea(mPadded, nPadded, At, Cpadded);
+        atimestransposea_swizzled(mPadded, nPadded, At, Cpadded);
 
         // Perform a copy of Cpadded into C matrix (optimized for column major matrices)
         for(int j = 0; j < m; j++)
@@ -138,7 +172,7 @@ extern "C" void sgemm( int m, int n, float *A, float *C )
     // Otherwise, this is an optimal case where padding is not required
     else
     {
-        atimestransposea(m, n, At, C);
+        atimestransposea_swizzled(m, n, At, C);
     }
 
     // Release the transpose matrix
@@ -165,10 +199,12 @@ int main ()
     print_columnmajor(A, m, n, "A []:");
 
     // Compute and print the transpose matrix
-    Transpose(A, At, m, n, m, n);
-    std::cout << "A'[]:\t";
+    TransposeSwizzle(A, At, m, n, m, n);
+    //print_columnmajor(At, n, m, "A'[]:");
+    print_columnmajor_swizzled(At, n, m, "A'[]:");
+    /*std::cout << "A []:\t";
     for(size_t i = 0; i < m * n; i++)
-        std::cout << At[i] << "\t";
+        std::cout << At[i] << "\t";*/
     std::cout << std::endl;
 
     // Perform multiplication with the original method
@@ -181,7 +217,7 @@ int main ()
     memset((void *) C, 0, sizeof(float) * m * m);
 
     // Iterate through the columns of the matrix
-    sgemm(m,n,A,C);
+    sgemm_swizzled(m,n,A,C);
 
     // Output resulting arrays
     std::cout << "Result using SSE optimized algorithm" << std::endl;
