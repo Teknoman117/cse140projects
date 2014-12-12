@@ -1,10 +1,10 @@
 CC = gcc -std=gnu99
 CXX = g++ -std=c++11
 
-CFLAGS = -g -msse4 -O3 -pipe -fno-omit-frame-pointer -fopenmp
-#CFLAGS = -g -msse4 -pipe -fno-omit-frame-pointer -fopenmp
+CFLAGS = -g -msse4 -O3 -pipe -fno-omit-frame-pointer
+#CFLAGS = -g -msse4 -pipe -fno-omit-frame-pointer
 CXXFLAGS = $(CFLAGS)
-LDFLAGS = -fopenmp
+LDFLAGS = 
 
 all:	bench-naive bench-optimize test
 

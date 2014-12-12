@@ -1,7 +1,15 @@
 #include <iostream>
-#include <malloc.h>
+//#include <malloc.h>
 #include <cstring>
+#include <cstdlib>
+#include <cstdio>
+#include <cmath>
 
+// Unix stuff
+#include <time.h>
+#include <sys/time.h>
+
+// SSE Instrinsics
 #include <xmmintrin.h>
 
 // Index into an MxN matrix.  r = row #, c = column #
@@ -67,7 +75,6 @@ void print_columnmajor_swizzled(float *A, int m, int n, std::string name)
 /* method provided by the code */
 void sgemm_reference( int m, int n, float *A, float *C)
 {
-  #pragma omp parallel for
   for( int i = 0; i < m; i++ )
     for( int k = 0; k < n; k++ )
       for( int j = 0; j < m; j++ )
@@ -142,7 +149,7 @@ inline void atimestransposea_swizzled( int m, int n, float *A, float *C )
 }
 
 // Multiply A matrix by its transpose
-extern "C" void sgemm_swizzled( int m, int n, float *A, float *C )
+extern "C" void sgemm( int m, int n, float *A, float *C )
 {
     // Recompute boundaries of the matrix (align to 4, for sse)
     int mPadded = (m & ~0x03) + ((m & 0x03) ? 4 : 0);
@@ -180,7 +187,7 @@ extern "C" void sgemm_swizzled( int m, int n, float *A, float *C )
 }
 
 // Test
-int main ()
+/*int main ()
 {
     size_t m = 8;
     size_t n = 4;
@@ -202,9 +209,9 @@ int main ()
     TransposeSwizzle(A, At, m, n, m, n);
     //print_columnmajor(At, n, m, "A'[]:");
     print_columnmajor_swizzled(At, n, m, "A'[]:");
-    /*std::cout << "A []:\t";
-    for(size_t i = 0; i < m * n; i++)
-        std::cout << At[i] << "\t";*/
+    //std::cout << "A []:\t";
+    //for(size_t i = 0; i < m * n; i++)
+    //    std::cout << At[i] << "\t";
     std::cout << std::endl;
 
     // Perform multiplication with the original method
@@ -225,4 +232,84 @@ int main ()
     std::cout << std::endl;
 
     return 0;
+}*/
+
+/* The benchmarking program */
+
+int main( int argc, char **argv )
+{
+    srand(time(NULL));
+    
+    for( int n = 32; n <= 1024; n *= 2 )
+    {
+        /* Try different m */
+        for( int m = 32; m <= 1024; m *= 2)
+        {
+            /* Allocate and fill 2 random matrices A, C */
+            float *A = (float*) malloc( m * n * sizeof(float) );
+            float *C = (float*) malloc( m * m * sizeof(float) );
+            float *C_ref = (float*) malloc( m * m * sizeof(float) );
+            
+            for( int i = 0; i < m*n; i++ ) A[i] = 2 * drand48() - 1;
+            for( int i = 0; i < m*m; i++ ) C[i] = 2 * drand48() - 1;
+            
+            // Compute the transpose of the matrix
+            float *At = (float *) calloc (m * n, sizeof(float));
+            TransposeSwizzle(A, At, m, n, m, n);
+            
+            /* measure Gflop/s rate; time a sufficiently long sequence of calls to eliminate noise */
+            double Gflop_s, seconds = -1.0;
+            for( int n_iterations = 1; seconds < 0.1; n_iterations *= 2 )
+            {
+                /* warm-up */
+                //atimestransposea_swizzled( m, n, At, C );
+                sgemm(m, n, A, C);
+                
+                /* measure time */
+                struct timeval start, end;
+                gettimeofday( &start, NULL );
+                for( int i = 0; i < n_iterations; i++ )
+                    //atimestransposea_swizzled( m,n,At, C );
+                    sgemm(m, n, A, C);
+                
+                gettimeofday( &end, NULL );
+                seconds = (end.tv_sec - start.tv_sec) + 1.0e-6 * (end.tv_usec - start.tv_usec);
+                
+                /* compute Gflop/s rate */
+                Gflop_s = 2e-9 * n_iterations * m * m * n / seconds;
+            }
+            
+            printf( "%d by %d matrix with strip size %d \t %g Gflop/s\n", n, n,m, Gflop_s );
+            
+            /* Ensure that error does not exceed the theoretical error bound */
+            
+            /* Set initial C to 0 and do matrix multiply of A*B */
+            memset( C, 0, sizeof( float ) * m * m );
+            //atimestransposea_swizzled( m,n, At, C );
+            sgemm( m, n, A, C);
+            
+            /* Subtract A*B from C using standard sgemm and reference (note that this should be 0 to within machine roundoff) */
+            memset( C_ref, 0, sizeof( float ) * m * m );
+            sgemm_reference( m,n,A,C_ref );
+            
+            /* Subtract the maximum allowed roundoff from each element of C */
+            for( int i = 0; i < m*m; i++ ) C[i] -= C_ref[i] ;
+            
+            /* After this test if any element in C is still positive something went wrong in square_sgemm */
+            for( int i = 0; i < m * m; i++ )
+                if( C[i] > 0 )
+                {
+                    printf( "FAILURE: error in matrix multiply exceeds an acceptable margin\n" );
+                    printf( "Off by: %f, from the reference: %f, at n = %d, m = %d\n",C[i], C_ref[i], n, m );
+                    return -1;
+                }
+            
+            /* release memory */
+            free( C_ref );
+            free( C );
+            free( A );
+        }
+    }
+    return 0;
 }
+
